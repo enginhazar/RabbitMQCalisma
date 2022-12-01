@@ -1,18 +1,14 @@
-﻿using Newtonsoft.Json;
+﻿using Nest;
+using Newtonsoft.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitmqCalisma.Properties;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Globalization;
-using System.Linq;
-using System.Runtime.Remoting.Contexts;
-using System.Security.Principal;
+using System.Data.SqlClient;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace RabbitmqCalisma
 {
@@ -30,17 +26,17 @@ namespace RabbitmqCalisma
         private void button1_Click(object sender, EventArgs e)
         {
 
-            foreach (var item in Sicil.GenerateSicil(baslangic))
+            foreach (var item in Personel.GenerateSicil(baslangic))
             {
                 RabbitMQHelper.AddQueue(item);
             }
             baslangic+=2000;
-            
+
         }
 
         private void button2_Click(object sender, EventArgs e)
         {
-            List<Sicil> sicils = RabbitMQHelper.ConsumeQueue();
+            List<Personel> sicils = RabbitMQHelper.ConsumeQueue();
 
             foreach (var item in sicils)
             {
@@ -53,16 +49,33 @@ namespace RabbitmqCalisma
                                       ----------------------------------";
             }
         }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            ElasticSearchNestHelper.AddPersonel(new Personel() { Adi="engin", Soyadi="hazar",Adres="Yüzüncüyıl",DogumTarihi=new DateTime(1979,02,13),Sicilno=1,TcKimlikNo=37396047610 });
+        }
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+           // ElasticSearchNestHelper.CreateIndex("Personel");
+        }
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+         //   ElasticSearchHelper.GetAllData("Personel");
+        }
     }
 
     public class RabbitMQHelper
     {
-        public static void  AddQueue(object model)
+        public static void AddQueue(object model)
         {
-            var factory = new ConnectionFactory() 
-            { HostName = "localhost",
+            var factory = new ConnectionFactory()
+            {
+                HostName = "localhost",
                 UserName = "admin",
-                Password = "123456" };
+                Password = "123456"
+            };
             //Channel yaratmak için
             using (IConnection connection = factory.CreateConnection())
             using (IModel channel = connection.CreateModel())
@@ -77,7 +90,7 @@ namespace RabbitmqCalisma
                 string message = JsonConvert.SerializeObject(model);
                 var body = Encoding.UTF8.GetBytes(message);
 
-         
+
                 //Queue ya atmak için kullanılır.
                 channel.BasicPublish(exchange: "",//mesajın alınıp bir veya birden fazla queue ya konmasını sağlıyor.
                     routingKey: "Sicil", //Hangi queue ya atanacak.
@@ -85,9 +98,9 @@ namespace RabbitmqCalisma
             }
         }
 
-        public static List<Sicil> ConsumeQueue()
+        public static List<Personel> ConsumeQueue()
         {
-            List<Sicil> ret = new List<Sicil>();
+            List<Personel> ret = new List<Personel>();
             var factory = new ConnectionFactory() { HostName = "localhost", UserName = "admin", Password = "123456" };
             using (IConnection connection = factory.CreateConnection())
             using (IModel channel = connection.CreateModel())
@@ -99,11 +112,11 @@ namespace RabbitmqCalisma
                 {
                     var body = ea.Body;//TODO: Kuyruktaki içerik bilgisi.
                     var message = Encoding.UTF8.GetString(body.ToArray());//TODO: Gelen bodyi stringe çeviriyoruz.
-                    Sicil sicil = JsonConvert.DeserializeObject<Sicil>(message); //TODO: Mesajdan dönen veriyi classa çeviriyoruz.
+                    Personel sicil = JsonConvert.DeserializeObject<Personel>(message); //TODO: Mesajdan dönen veriyi classa çeviriyoruz.
                     ret.Add(sicil);
-                    
+
                 };
-                channel.BasicConsume(queue: "Sicil", //TODO: Consume edilecek kuyruk ismi
+                channel.BasicConsume(queue: "Personel", //TODO: Consume edilecek kuyruk ismi
                     autoAck: true, //TODO: Kuyruk ismi doğrulansın mı
                     consumer: consumer); //TODO: Hangi consumer kullanılacak.
                 return ret;
@@ -112,7 +125,39 @@ namespace RabbitmqCalisma
         }
     }
 
-    public class Sicil
+
+    public  class ElasticSearchNestHelper
+    {
+
+         static ConnectionSettings setttings = new ConnectionSettings(new Uri("http://localhost:9200"))
+            .BasicAuthentication("elastic", "123456");
+        static ElasticClient client =new ElasticClient(setttings);
+        
+
+        public static void AddPersonel(Personel personel)
+        {
+            if (!client.Indices.Exists("personel").Exists)
+                CreateIndex();
+            var response=client.Index<Personel>(personel,ind=> ind.Index("personel"));
+            if (!response.IsValid)
+            {
+                Console.WriteLine(response.ToString()); 
+            }
+        }
+
+        private static void CreateIndex()
+        {
+            client.Indices.Create("personel", c1 =>
+            c1.Index("personel")
+            .Mappings(ms=> ms.Map<Personel>(m=> m.AutoMap()))
+            .Aliases(a=> a.Alias("personel"))
+            .Settings(s=> s.NumberOfShards(3).NumberOfReplicas(1)
+            ));
+        }
+
+    }
+
+    public class Personel
     {
         public int Sicilno { get; set; }
         public Int64 TcKimlikNo { get; set; }
@@ -122,17 +167,17 @@ namespace RabbitmqCalisma
 
         public DateTime DogumTarihi { get; set; }
 
-        public static List<Sicil> GenerateSicil(int baslangic)
+        public static List<Personel> GenerateSicil(int baslangic)
         {
-            List<Sicil> list = new List<Sicil>();
+            List<Personel> list = new List<Personel>();
             for (int i = baslangic; i < baslangic+2000; i++)
             {
-                list.Add(new Sicil()
+                list.Add(new Personel()
                 {
-                    Sicilno = i,    
+                    Sicilno = i,
                     TcKimlikNo=12345678901+i,
-                    DogumTarihi=new DateTime(2000+i%10,1,1,10,12,45),
-                    Adi=i%2==0? $"üğişçöÜĞŞİÇÖ{i}":$"Defne_{i}",
+                    DogumTarihi=new DateTime(2000+i%10, 1, 1, 10, 12, 45),
+                    Adi=i%2==0 ? $"üğişçöÜĞŞİÇÖ{i}" : $"Defne_{i}",
                     Soyadi=$"Hazar_{i}",
                     Adres="Yüzüncü Yıl Mahallesi Prof Dr.Erdal İnönü Caddesi Günce Sitesi Kat:10 D:20"
 
